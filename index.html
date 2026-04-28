@@ -216,8 +216,8 @@
                 player.damage += Math.floor(Math.random() * 5) + 8; // 8~12%ダメージ
                 player.stun = 20;
                 
-                // スマブラ風ふっとばし計算 (基礎値 + ダメージ倍率)
-                const knockbackForce = 5 + (player.damage * 0.15);
+                // スマブラ風ふっとばし計算 (基礎値 + ダメージ倍率) ← 吹っ飛ばしの上限を完全撤廃し、ダメージに応じて無限に強くなるように強化（より派手で爽快に！）
+                const knockbackForce = 5 + (player.damage * 0.3);
                 player.vx = attacker.facing * knockbackForce;
                 player.vy = -knockbackForce * 0.8; // 斜め上にふっとぶ
             }
