@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Smash Online: Web Brawler</title>
+    <style>
+        * { touch-action: none; -webkit-user-select: none; user-select: none; box-sizing: border-box; }
+        body { 
+            margin: 0; overflow: hidden; background-color: #87CEEB; 
+            font-family: 'Arial Black', sans-serif; 
+            position: fixed; width: 100%; height: 100%; 
+        }
+        canvas { display: block; }
+
+        #setup { 
+            position: absolute; inset: 0; background: rgba(0,0,0,0.85); 
+            display: flex; flex-direction: column; align-items: center; justify-content: center; 
+            z-index: 100; color: white; padding: 20px; text-align: center; 
+        }
+        .btn { 
+            padding: 14px 24px; margin: 8px; font-size: 18px; cursor: pointer; 
+            border-radius: 10px; border: none; font-weight: bold; transition: 0.2s;
+            background: #f1c40f; color: #000; width: 250px;
+        }
+
+        #ui-layer {
+            position: absolute; bottom: 20px; width: 100%; 
+            display: flex; justify-content: center; gap: 40px; pointer-events: none;
+            z-index: 10;
+        }
+        .player-status {
+            background: rgba(0,0,0,0.7); color: white; padding: 10px 20px;
+            border-radius: 10px; border: 3px solid #fff; text-align: center;
+            min-width: 120px;
+        }
+        .damage-text { font-size: 32px; font-weight: bold; }
+
+        /* モバイル用コントローラー */
+        #mobile-controls { 
+            display: none; position: absolute; inset: 0; pointer-events: none; z-index: 50; 
+        }
+        .m-btn { 
+            position: absolute; background: rgba(0,0,0,0.5); color: white; 
+            border-radius: 50%; display: flex; align-items: center; justify-content: center; 
+            pointer-events: auto; font-size: 24px; font-weight: bold; border: 3px solid rgba(255,255,255,0.6);
+        }
+        #btn-left { bottom: 30px; left: 30px; width: 80px; height: 80px; }
+        #btn-right { bottom: 30px; left: 130px; width: 80px; height: 80px; }
+        #btn-jump { bottom: 120px; right: 30px; width: 80px; height: 80px; background: rgba(46, 204, 113, 0.6); }
+        #btn-attack { bottom: 30px; right: 100px; width: 90px; height: 90px; background: rgba(231, 76, 60, 0.6); }
+
+    </style>
+</head>
+<body>
+
+    <div id="setup">
+        <h1 style="color:#f1c40f; margin-bottom:10px;">SMASH BRAWLER ONLINE</h1>
+        <p>相手を攻撃してダメージ(%)を蓄積させ、<br>画面外へふっとばせ！</p>
+        <button id="start-game" class="btn">BATTLE START</button>
+    </div>
+
+    <div id="ui-layer" id="status-container">
+        </div>
+
+    <div id="mobile-controls">
+        <div id="btn-left" class="m-btn">◀</div>
+        <div id="btn-right" class="m-btn">▶</div>
+        <div id="btn-attack" class="m-btn">A</div>
+        <div id="btn-jump" class="m-btn">J</div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+    (function() {
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const worldWidth = 1600, worldHeight = 900;
+        const HUB_NAME = "smash_brawler_2026_hub"; 
+
+        // ステージ定義（中央のメインプラットフォームと浮遊足場）
+        const platforms = [
+            { x: worldWidth/2 - 400, y: worldHeight - 300, w: 800, h: 40 },
+            { x: worldWidth/2 - 250, y: worldHeight - 450, w: 150, h: 20 },
+            { x: worldWidth/2 + 100, y: worldHeight - 450, w: 150, h: 20 },
+            { x: worldWidth/2 - 75,  y: worldHeight - 600, w: 150, h: 20 }
+        ];
+
+        const player = {
+            id: "P-" + Math.random().toString(36).substr(2, 5),
+            name: "Player",
+            x: worldWidth/2, y: worldHeight/2 - 200, w: 40, h: 60,
+            vx: 0, vy: 0, 
+            color: `hsl(${Math.random()*360}, 80%, 50%)`,
+            damage: 0, jumps: 2, facing: 1, 
+            isAttacking: 0, stun: 0
+        };
+
+        const players = {};
+        const keys = { left: false, right: false, jump: false, attack: false };
+        let isMobileMode = false;
+        let socket;
+
+        // 物理演算定数
+        const GRAVITY = 0.6;
+        const FRICTION = 0.85;
+        const SPEED = 6;
+        const JUMP_FORCE = -14;
+        const MAX_FALL = 15;
+
+        // ==========================
+        // 入力制御 (PC & モバイル)
+        // ==========================
+        document.getElementById('start-game').onclick = () => {
+            player.name = prompt("名前を入力", "Fighter") || "Guest";
+            document.getElementById('setup').style.display = 'none';
+            if('ontouchstart' in window) { 
+                isMobileMode = true; 
+                document.getElementById('mobile-controls').style.display = 'block'; 
+            }
+            initSocket();
+            requestAnimationFrame(gameLoop);
+        };
+
+        // PCキーボード
+        window.onkeydown = (e) => { 
+            if(e.key === 'ArrowLeft' || e.key === 'a') keys.left = true;
+            if(e.key === 'ArrowRight' || e.key === 'd') keys.right = true;
+            if((e.key === 'ArrowUp' || e.key === 'w') && !keys.jump) { keys.jump = true; doJump(); }
+            if(e.key === ' ' && !keys.attack) { keys.attack = true; doAttack(); }
+        };
+        window.onkeyup = (e) => {
+            if(e.key === 'ArrowLeft' || e.key === 'a') keys.left = false;
+            if(e.key === 'ArrowRight' || e.key === 'd') keys.right = false;
+            if(e.key === 'ArrowUp' || e.key === 'w') keys.jump = false;
+            if(e.key === ' ') keys.attack = false;
+        };
+
+        // モバイルタッチ（ワープ対策済：座標タップではなく固定ボタン）
+        const bindBtn = (id, keyName, action) => {
+            const btn = document.getElementById(id);
+            btn.addEventListener('touchstart', (e) => { e.preventDefault(); keys[keyName] = true; if(action) action(); });
+            btn.addEventListener('touchend', (e) => { e.preventDefault(); keys[keyName] = false; });
+        };
+        bindBtn('btn-left', 'left');
+        bindBtn('btn-right', 'right');
+        bindBtn('btn-jump', 'jump', doJump);
+        bindBtn('btn-attack', 'attack', doAttack);
+
+        // ==========================
+        // ネットワーク (Achex)
+        // ==========================
+        function initSocket() {
+            socket = new WebSocket('wss://cloud.achex.ca/');
+            socket.onopen = () => {
+                socket.send(JSON.stringify({auth: player.id, passwd: "pass"}));
+                socket.send(JSON.stringify({joinHub: HUB_NAME}));
+            };
+
+            socket.onmessage = (e) => {
+                try {
+                    const data = JSON.parse(e.data);
+                    if (data.auth || data.joinHub) return;
+
+                    if (data.type === 'state' && data.id !== player.id) {
+                        players[data.id] = {...data, lastUpdate: Date.now()};
+                        updateUI();
+                    }
+                    // 攻撃を受信した時、自分が当たっているかローカルで判定
+                    if (data.type === 'attack' && data.id !== player.id) {
+                        players[data.id] = data.pState;
+                        players[data.id].isAttacking = 10; // アニメーション用
+                        checkHit(data.pState, data.hitbox);
+                    }
+                } catch(err) {}
+            };
+        }
+
+        // ==========================
+        // アクション
+        // ==========================
+        function doJump() {
+            if (player.stun > 0) return;
+            if (player.jumps > 0) {
+                player.vy = JUMP_FORCE;
+                player.jumps--;
+            }
+        }
+
+        function doAttack() {
+            if (player.stun > 0 || player.isAttacking > 0) return;
+            player.isAttacking = 15; // 攻撃の持続フレーム
+            
+            const hitbox = {
+                x: player.facing === 1 ? player.x + player.w : player.x - 60,
+                y: player.y + 10,
+                w: 60, h: 40
+            };
+
+            if (socket && socket.readyState === 1) {
+                socket.send(JSON.stringify({
+                    toH: HUB_NAME, type: 'attack', id: player.id, pState: getPlayerState(), hitbox: hitbox
+                }));
+            }
+        }
+
+        function checkHit(attacker, hitbox) {
+            if (player.stun > 0) return; // 無敵時間・硬直中は連続ヒットしない
+            
+            // AABB衝突判定
+            if (player.x < hitbox.x + hitbox.w && player.x + player.w > hitbox.x &&
+                player.y < hitbox.y + hitbox.h && player.y + player.h > hitbox.y) {
+                
+                // ダメージ計算とふっとばし
+                player.damage += Math.floor(Math.random() * 5) + 8; // 8~12%ダメージ
+                player.stun = 20;
+                
+                // スマブラ風ふっとばし計算 (基礎値 + ダメージ倍率)
+                const knockbackForce = 5 + (player.damage * 0.15);
+                player.vx = attacker.facing * knockbackForce;
+                player.vy = -knockbackForce * 0.8; // 斜め上にふっとぶ
+            }
+        }
+
+        function getPlayerState() {
+            return {
+                x: player.x, y: player.y, damage: player.damage, 
+                facing: player.facing, color: player.color, name: player.name
+            };
+        }
+
+        // ==========================
+        // メインループ・物理演算
+        // ==========================
+        function update() {
+            if (player.stun > 0) {
+                player.stun--;
+            } else {
+                if (keys.left) { player.vx -= 1.5; player.facing = -1; }
+                if (keys.right) { player.vx += 1.5; player.facing = 1; }
+            }
+            if (player.isAttacking > 0) player.isAttacking--;
+
+            // 重力と摩擦
+            player.vy += GRAVITY;
+            if (player.vy > MAX_FALL) player.vy = MAX_FALL;
+            
+            // 空中・地上の摩擦切り替え
+            if (player.jumps === 2) player.vx *= FRICTION; // 地上
+            else player.vx *= 0.95; // 空中
+
+            // 速度上限
+            if (player.stun === 0) {
+                if (player.vx > SPEED) player.vx = SPEED;
+                if (player.vx < -SPEED) player.vx = -SPEED;
+            }
+
+            // 移動の適用
+            player.x += player.vx;
+            player.y += player.vy;
+
+            // 足場との判定
+            let onGround = false;
+            for (let p of platforms) {
+                // 上から落ちてきた時のみ乗れる (すり抜け床仕様)
+                if (player.vy >= 0 && 
+                    player.y + player.h - player.vy <= p.y && 
+                    player.y + player.h >= p.y && 
+                    player.x + player.w > p.x && 
+                    player.x < p.x + p.w) {
+                    
+                    player.y = p.y - player.h;
+                    player.vy = 0;
+                    player.jumps = 2; // ジャンプ回数リセット
+                    onGround = true;
+                }
+            }
+
+            // バーストライン（即復活：リロードなしで座標とダメージをリセット）
+            if (player.y > worldHeight + 200 || player.x < -400 || player.x > worldWidth + 400 || player.y < -400) {
+                player.x = worldWidth / 2;
+                player.y = worldHeight / 2 - 200;
+                player.vx = 0;
+                player.vy = 0;
+                player.damage = 0; // ダメージリセット
+                player.jumps = 2;
+            }
+
+            // サーバーへ状態送信 (毎フレームだと重いので定期送信)
+            if (socket && socket.readyState === 1 && Math.random() < 0.3) {
+                socket.send(JSON.stringify({
+                    toH: HUB_NAME, type: 'state', id: player.id, ...getPlayerState()
+                }));
+            }
+            updateUI();
+        }
+
+        // ==========================
+        // UI・描画
+        // ==========================
+        function updateUI() {
+            const ui = document.getElementById('ui-layer');
+            let html = `<div class="player-status" style="border-color:${player.color}">
+                            <div>${player.name}</div>
+                            <div class="damage-text" style="color:${getDamageColor(player.damage)}">${player.damage}%</div>
+                        </div>`;
+            
+            for (let id in players) {
+                if(Date.now() - players[id].lastUpdate < 3000) {
+                    html += `<div class="player-status" style="border-color:${players[id].color}">
+                                <div>${players[id].name}</div>
+                                <div class="damage-text" style="color:${getDamageColor(players[id].damage)}">${players[id].damage}%</div>
+                            </div>`;
+                }
+            }
+            ui.innerHTML = html;
+        }
+
+        function getDamageColor(dmg) {
+            if(dmg < 50) return 'white';
+            if(dmg < 100) return '#f1c40f'; // 黄色
+            return '#e74c3c'; // 赤色
+        }
+
+        function draw() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            
+            // カメラを中心のプラットフォームを基準にしつつ、少しプレイヤーに追従
+            const camX = Math.max(0, Math.min(worldWidth - canvas.width, player.x - canvas.width / 2));
+            const camY = Math.max(0, Math.min(worldHeight - canvas.height, player.y - canvas.height / 2));
+
+            ctx.save();
+            ctx.translate(-camX, -camY);
+
+            // 背景描画
+            ctx.fillStyle = "#87CEEB"; 
+            ctx.fillRect(camX, camY, canvas.width, canvas.height);
+
+            // ステージ描画
+            platforms.forEach(p => {
+                ctx.fillStyle = "#2c3e50"; // メインカラー
+                ctx.fillRect(p.x, p.y, p.w, p.h);
+                ctx.fillStyle = "#27ae60"; // 上面の草カラー(色は草ですが、装飾・茂みオブジェクトは排除済)
+                ctx.fillRect(p.x, p.y, p.w, 8);
+            });
+
+            // プレイヤー描画関数
+            const drawPlayer = (p, isAttacking) => {
+                ctx.fillStyle = p.stun > 0 && Math.floor(Date.now() / 100) % 2 === 0 ? "white" : p.color;
+                ctx.fillRect(p.x, p.y, p.w || 40, p.h || 60);
+
+                // 目（向いている方向）
+                ctx.fillStyle = "white";
+                ctx.fillRect(p.facing === 1 ? p.x + 25 : p.x + 5, p.y + 10, 10, 10);
+
+                // 攻撃エフェクト
+                if (isAttacking > 0) {
+                    ctx.fillStyle = "rgba(255, 0, 0, 0.6)";
+                    const hx = p.facing === 1 ? p.x + 40 : p.x - 60;
+                    ctx.fillRect(hx, p.y + 10, 60, 40);
+                }
+
+                // 名前
+                ctx.fillStyle = "black";
+                ctx.font = "bold 14px Arial";
+                ctx.textAlign = "center";
+                ctx.fillText(p.name, p.x + 20, p.y - 10);
+            };
+
+            // 他プレイヤー描画
+            for (let id in players) {
+                if(Date.now() - players[id].lastUpdate < 3000) {
+                    drawPlayer(players[id], players[id].isAttacking);
+                    if(players[id].isAttacking > 0) players[id].isAttacking--;
+                }
+            }
+            
+            // 自分を描画
+            drawPlayer(player, player.isAttacking);
+
+            ctx.restore();
+        }
+
+        function gameLoop() { 
+            update(); 
+            draw(); 
+            requestAnimationFrame(gameLoop); 
+        }
+    })();
+    </script>
+</body>
+</html>
