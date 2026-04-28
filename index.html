@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Smash Online: Web Brawler</title>
+    <title>Smash Online</title>
     <style>
         * { touch-action: none; -webkit-user-select: none; user-select: none; box-sizing: border-box; }
         body { 
@@ -55,7 +55,7 @@
 <body>
 
     <div id="setup">
-        <h1 style="color:#f1c40f; margin-bottom:10px;">SMASH BRAWLER ONLINE</h1>
+        <h1 style="color:#f1c40f; margin-bottom:10px;">SMASH ONLINE</h1>
         <p>相手を攻撃してダメージ(%)を蓄積させ、<br>画面外へふっとばせ！</p>
         <button id="start-game" class="btn">BATTLE START</button>
     </div>
@@ -152,7 +152,7 @@
         // ネットワーク (Achex)
         // ==========================
         function initSocket() {
-            socket = new WebSocket('wss://cloud.achex.ca/');
+            socket = new WebSocket('wss://cloud.achex.ca/deee');
             socket.onopen = () => {
                 socket.send(JSON.stringify({auth: player.id, passwd: "pass"}));
                 socket.send(JSON.stringify({joinHub: HUB_NAME}));
@@ -190,7 +190,7 @@
 
         function doAttack() {
             if (player.stun > 0 || player.isAttacking > 0) return;
-            player.isAttacking = 15; // 攻撃の持続フレーム
+            player.isAttacking = 30; // 攻撃の持続フレーム
             
             const hitbox = {
                 x: player.facing === 1 ? player.x + player.w : player.x - 60,
