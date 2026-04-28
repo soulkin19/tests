@@ -288,7 +288,7 @@
             }
 
             // サーバーへ状態送信 (毎フレームだと重いので定期送信)
-            if (socket && socket.readyState === 1 && Math.random() < 0.1) {
+            if (socket && socket.readyState === 1 && Math.random() < 0.02) {
                 socket.send(JSON.stringify({
                     toH: HUB_NAME, type: 'state', id: player.id, ...getPlayerState()
                 }));
