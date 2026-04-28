@@ -190,7 +190,7 @@
 
         function doAttack() {
             if (player.stun > 0 || player.isAttacking > 0) return;
-            player.isAttacking = 30; // 攻撃の持続フレーム
+            player.isAttacking = 15; // 攻撃の持続フレーム
             
             const hitbox = {
                 x: player.facing === 1 ? player.x + player.w : player.x - 60,
@@ -288,7 +288,7 @@
             }
 
             // サーバーへ状態送信 (毎フレームだと重いので定期送信)
-            if (socket && socket.readyState === 1 && Math.random() < 0.3) {
+            if (socket && socket.readyState === 1 && Math.random() < 0.1) {
                 socket.send(JSON.stringify({
                     toH: HUB_NAME, type: 'state', id: player.id, ...getPlayerState()
                 }));
